@@ -1,0 +1,89 @@
+#app {
+  display: flex;
+  font-size: 14px;
+  gap: 0.5rem;
+  height: 100vh;
+  padding: 0.5rem;
+}
+
+#side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  transition: width 0.25s;
+  width: 12rem;
+}
+
+#side.collapsed {
+  width: 3.5rem;
+}
+
+#side.collapsed .nav-button span,
+#side.collapsed .brand {
+  display: none;
+}
+
+.brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  padding: 0 0.75rem;
+}
+
+#side-drag {
+  -webkit-app-region: drag;
+  height: 2.5rem;
+}
+
+#side-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+#mode-select {
+  align-self: center;
+}
+
+#main {
+  background: var(--color-lighter);
+  border-radius: 0.75rem;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.page.active {
+  display: flex;
+}
+
+#grid {
+  flex: 1;
+}
+
+#grid .ag-cell {
+  align-items: center;
+  display: flex;
+}
+
+#grid .ag-header-cell-menu-button,
+#grid .ag-header-icon {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#grid .ag-header-cell:hover .ag-header-cell-menu-button,
+#grid .ag-header-cell:hover .ag-header-icon {
+  opacity: 1;
+}
+

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Minterface</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;700&display=swap">
+    <link rel="stylesheet" href="minterface.css">
+    <link rel="stylesheet" href="app.css">
+    <script crossorigin="anonymous" defer src="https://kit.fontawesome.com/46660cdeff.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-enterprise@35.2.0/dist/ag-grid-enterprise.min.js"></script>
+    <script defer src="renderer.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="side">
+        <div id="side-drag"></div>
+        <div class="brand">Minterface</div>
+        <nav id="side-nav">
+          <div class="nav-group">
+            <a class="nav-button active" data-page="dashboard">
+              <i class="fa-regular fa-house"></i>
+              <span>Dashboard</span>
+            </a>
+            <a class="nav-button" data-page="settings">
+              <i class="fa-regular fa-gear"></i>
+              <span>Settings</span>
+            </a>
+          </div>
+        </nav>
+        <div class="button-group" id="mode-select">
+          <button class="button" data-mode="system"><i class="fa-regular fa-circle-half-stroke"></i></button>
+          <button class="button" data-mode="light"><i class="fa-regular fa-sun"></i></button>
+          <button class="button" data-mode="dark"><i class="fa-regular fa-moon"></i></button>
+        </div>
+        <a class="nav-button" id="sidebar-toggle">
+          <i class="fa-regular fa-sidebar"></i>
+        </a>
+      </aside>
+      <main id="main">
+        <section class="page active" id="dashboard">
+          <div id="grid"></div>
+        </section>
+        <section class="page" id="settings">
+          <h1>Settings</h1>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

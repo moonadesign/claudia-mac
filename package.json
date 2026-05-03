@@ -1,0 +1,12 @@
+{
+  "name": "minterface-electron",
+  "productName": "Minterface",
+  "version": "0.1.0",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^41.1.1"
+  }
+}
