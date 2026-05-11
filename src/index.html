@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <title>Minterface</title>
+    <title>Claudia</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;700&display=swap">
@@ -16,35 +16,80 @@
     <div id="app">
       <aside id="side">
         <div id="side-drag"></div>
-        <div class="brand">Minterface</div>
+        <div class="brand">Claudia</div>
         <nav id="side-nav">
           <div class="nav-group">
-            <a class="nav-button active" data-page="dashboard">
+            <a class="nav-button active" data-page="home">
               <i class="fa-regular fa-house"></i>
-              <span>Dashboard</span>
+              <span>Home</span>
             </a>
-            <a class="nav-button" data-page="settings">
-              <i class="fa-regular fa-gear"></i>
+            <a class="nav-button" data-page="sessions">
+              <i class="fa-regular fa-messages"></i>
+              <span>Sessions</span>
+              <span class="nav-count" id="sessions-count"></span>
+            </a>
+            <a class="nav-button" data-page="memories">
+              <i class="fa-regular fa-brain"></i>
+              <span>Memories</span>
+              <span class="nav-count" id="memories-count"></span>
+            </a>
+            <a class="nav-button" data-page="rules">
+              <i class="fa-regular fa-scroll"></i>
+              <span>Rules</span>
+              <span class="nav-count" id="rules-count"></span>
+            </a>
+            <a class="nav-button" data-page="settings-page">
+              <i class="fa-regular fa-sliders"></i>
               <span>Settings</span>
+              <span class="nav-count" id="settings-count"></span>
+            </a>
+            <a class="nav-button" data-page="stats">
+              <i class="fa-regular fa-chart-bar"></i>
+              <span>Stats</span>
             </a>
           </div>
         </nav>
-        <div class="button-group" id="mode-select">
-          <button class="button" data-mode="system"><i class="fa-regular fa-circle-half-stroke"></i></button>
-          <button class="button" data-mode="light"><i class="fa-regular fa-sun"></i></button>
-          <button class="button" data-mode="dark"><i class="fa-regular fa-moon"></i></button>
-        </div>
+        <a class="nav-button" id="mode"><i id="mode-icon"></i><span id="mode-label"></span></a>
         <a class="nav-button" id="sidebar-toggle">
           <i class="fa-regular fa-sidebar"></i>
         </a>
       </aside>
       <main id="main">
-        <section class="page active" id="dashboard">
-          <div id="grid"></div>
+        <section class="page active" id="home">
+          <div id="home-grid">
+            <div class="home-card home-card-hero home-card-today" id="card-today">
+              <div class="home-card-label">Today</div>
+              <div class="home-card-big" id="today-big"></div>
+              <div class="home-card-sub" id="today-sub"></div>
+            </div>
+            <div class="home-card glass home-card-sessions" id="card-sessions" data-nav="sessions">
+              <div class="home-card-label">Sessions</div>
+              <div class="home-card-big" id="sessions-big"></div>
+              <div class="home-card-sub" id="sessions-sub"></div>
+            </div>
+            <div class="home-card glass home-card-memories" id="card-memories" data-nav="memories">
+              <div class="home-card-label">Memories</div>
+              <div class="home-card-big" id="memories-big"></div>
+              <div class="home-card-sub" id="memories-sub"></div>
+            </div>
+            <div class="home-card glass home-card-rules" id="card-rules" data-nav="rules">
+              <div class="home-card-label">Rules</div>
+              <div class="home-card-big" id="rules-big"></div>
+              <div class="home-card-sub" id="rules-sub"></div>
+            </div>
+            <div class="home-card glass home-card-stats" id="card-stats" data-nav="stats">
+              <div class="home-card-label">Stats</div>
+              <div class="home-card-big" id="stats-big"></div>
+              <div class="home-card-sub" id="stats-sub"></div>
+            </div>
+          </div>
         </section>
-        <section class="page" id="settings">
-          <h1>Settings</h1>
-        </section>
+        <template id="grid-page-template">
+          <section class="page">
+            <div class="page-header"><i></i><strong></strong><div class="fill"></div><button class="button outline" data-action="filter"><i class="fa-regular fa-bars-filter"></i> Filter</button><button class="button outline" data-action="columns"><i class="fa-regular fa-table-columns"></i> Columns</button></div>
+            <div class="grid-container"></div>
+          </section>
+        </template>
       </main>
     </div>
   </body>

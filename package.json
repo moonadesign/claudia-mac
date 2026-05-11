@@ -1,6 +1,6 @@
 {
-  "name": "minterface-electron",
-  "productName": "Minterface",
+  "name": "claudia-mac",
+  "productName": "Claudia",
   "version": "0.1.0",
   "main": "src/main.js",
   "scripts": {
