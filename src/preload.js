@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('api', {
   loadSessions: () => ipcRenderer.invoke('sessions:load'),
   loadSettings: () => ipcRenderer.invoke('settings:load'),
   loadStats: () => ipcRenderer.invoke('stats:load'),
+  loadTools: () => ipcRenderer.invoke('tools:load'),
   setTheme: mode => ipcRenderer.invoke('theme:set', mode),
 })

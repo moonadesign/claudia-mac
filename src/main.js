@@ -47,10 +47,10 @@ const modelCost = (model, u) => {
   return (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadInputTokens * p.cacheRead + u.cacheCreationInputTokens * p.cacheWrite) / 1e6
 }
 
-let tokenCache = { at: 0, date: null, today: 0, allTime: 0, byModel: {}, todayCost: 0, allTimeCost: 0 }
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
 const getTokens = () => {
-  const today = new Date().toISOString().slice(0, 10)
-  if (tokenCache.date === today && Date.now() - tokenCache.at < 3600000) return tokenCache
+  const today = localDate()
   let todayTokens = 0, allTimeTokens = 0
   const byModel = {}
   const todayByModel = {}
@@ -74,7 +74,7 @@ const getTokens = () => {
             byModel[model].outputTokens += u.output_tokens || 0
             byModel[model].cacheReadInputTokens += u.cache_read_input_tokens || 0
             byModel[model].cacheCreationInputTokens += u.cache_creation_input_tokens || 0
-            if (msg.timestamp?.startsWith(today)) {
+            if (msg.timestamp && localDate(new Date(msg.timestamp)) === today) {
               todayTokens += t
               if (!todayByModel[model]) todayByModel[model] = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, outputTokens: 0 }
               todayByModel[model].inputTokens += u.input_tokens || 0
@@ -90,31 +90,33 @@ const getTokens = () => {
   for (const m of Object.values(byModel)) m.cost = modelCost(m.model, m)
   const todayCost = Object.entries(todayByModel).reduce((sum, [model, u]) => sum + modelCost(model, u), 0)
   const allTimeCost = Object.values(byModel).reduce((sum, m) => sum + m.cost, 0)
-  tokenCache = { allTime: allTimeTokens, allTimeCost, at: Date.now(), byModel, date: today, today: todayTokens, todayCost }
-  return tokenCache
+  return { allTime: allTimeTokens, allTimeCost, byModel, today: todayTokens, todayCost }
 }
 
 ipcMain.handle('home:load', () => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localDate()
   const historyFile = path.join(claudeDir, 'history.jsonl')
   const projectsDir = path.join(claudeDir, 'projects')
   const statsFile = path.join(claudeDir, 'stats-cache.json')
 
-  let todaySessions = 0, todayMessages = 0, totalSessions = 0, totalMessages = 0
-  if (fs.existsSync(historyFile)) {
-    const sessions = new Map()
-    for (const line of fs.readFileSync(historyFile, 'utf-8').trim().split('\n')) {
-      const e = JSON.parse(line)
-      const key = e.sessionId || `${e.project}::${new Date(e.timestamp).toISOString().slice(0, 10)}`
-      if (!sessions.has(key)) sessions.set(key, [])
-      sessions.get(key).push(e.timestamp)
-    }
-    totalSessions = sessions.size
-    for (const [, timestamps] of sessions) {
-      totalMessages += timestamps.length
-      if (timestamps.some(t => new Date(t).toISOString().slice(0, 10) === today)) {
-        todaySessions++
-        todayMessages += timestamps.filter(t => new Date(t).toISOString().slice(0, 10) === today).length
+  let todaySessions = new Set(), todayMessages = 0, totalSessions = new Set(), totalMessages = 0
+  if (fs.existsSync(projectsDir)) {
+    for (const proj of fs.readdirSync(projectsDir)) {
+      const dir = path.join(projectsDir, proj)
+      for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+        const sid = file.replace('.jsonl', '')
+        let hasMessages = false
+        for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) {
+          if (!line.includes('"type":"user"')) continue
+          try {
+            const d = JSON.parse(line)
+            if (d.type !== 'user') continue
+            hasMessages = true
+            totalMessages++
+            if (d.timestamp && localDate(new Date(d.timestamp)) === today) { todayMessages++; todaySessions.add(sid) }
+          } catch {}
+        }
+        if (hasMessages) totalSessions.add(sid)
       }
     }
   }
@@ -159,13 +161,16 @@ ipcMain.handle('home:load', () => {
   }
 
   const tokens = getTokens()
+  const toolsData = getTools()
+  const toolsTotal = toolsData.reduce((sum, t) => sum + t.calls, 0)
   return {
     memories: { feedback: memoryTypes.feedback || 0, project: memoryTypes.project || 0, total: memories },
     rules: { global: globalRules, project: projectRules, total: rules },
-    sessions: { total: totalSessions, totalMessages },
+    sessions: { total: totalSessions.size, totalMessages },
     settings: { total: settings },
     stats: { allTimeCost: tokens.allTimeCost, allTimeTokens: tokens.allTime },
-    today: { cost: tokens.todayCost, messages: todayMessages, sessions: todaySessions, tokens: tokens.today },
+    today: { cost: tokens.todayCost, messages: todayMessages, sessions: todaySessions.size, tokens: tokens.today },
+    tools: { top3: toolsData.slice(0, 3).map(t => `${t.name} ${t.pct}%`).join(' · '), total: toolsTotal, unique: toolsData.length },
   }
 })
 
@@ -269,7 +274,7 @@ ipcMain.handle('sessions:load', () => {
       const gap = s.timestamps[i] - s.timestamps[i - 1]
       if (gap < GAP) active += gap
     }
-    const days = new Set(s.timestamps.map(t => new Date(t).toISOString().slice(0, 10))).size
+    const days = new Set(s.timestamps.map(t => localDate(new Date(t)))).size
     s.duration = Math.round(active / 60000) + days * 5
     delete s.timestamps
   }
@@ -297,6 +302,35 @@ ipcMain.handle('settings:load', () => {
   }
   return settings
 })
+
+const getTools = () => {
+  const tools = {}
+  const projectsDir = path.join(claudeDir, 'projects')
+  if (!fs.existsSync(projectsDir)) return []
+  for (const proj of fs.readdirSync(projectsDir)) {
+    const dir = path.join(projectsDir, proj)
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+      for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) {
+        if (!line.includes('"tool_use"')) continue
+        try {
+          const msg = JSON.parse(line)
+          const content = msg.message?.content
+          if (!Array.isArray(content)) continue
+          for (const block of content) {
+            if (block.type !== 'tool_use') continue
+            const name = block.name || 'unknown'
+            if (!tools[name]) tools[name] = { calls: 0, name }
+            tools[name].calls++
+          }
+        } catch {}
+      }
+    }
+  }
+  const total = Object.values(tools).reduce((sum, t) => sum + t.calls, 0)
+  return Object.values(tools).map(t => ({ ...t, pct: Math.round(t.calls / total * 1000) / 10 })).sort((a, b) => b.calls - a.calls)
+}
+
+ipcMain.handle('tools:load', () => getTools())
 
 ipcMain.handle('stats:load', () => {
   const tokens = getTokens()

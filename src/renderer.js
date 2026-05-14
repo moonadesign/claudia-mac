@@ -32,6 +32,7 @@ const gridDefaults = {
   theme: gridTheme,
 }
 
+const fmtCompact = n => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`
 const fmtCost = p => p.value != null ? `$${p.value.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}` : '—'
 const fmtDate = p => new Date(p.value).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
 const fmtDuration = p => { const m = p.value; if (m >= 1440) return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`; return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m` }
@@ -52,16 +53,18 @@ const pages = {
     data: window.api.loadHome(),
     render: d => {
       const now = new Date()
-      g('today-big').innerHTML = `${now.toLocaleDateString('en-US', { weekday: 'long' })}<br>${now.toLocaleDateString('en-US', { day: 'numeric', month: 'long' })}`
-      g('today-sub').textContent = `${d.today.sessions} sessions · ${d.today.messages} messages · ${d.today.tokens.toLocaleString()} tokens · $${d.today.cost.toFixed(2)}`
-      g('sessions-big').innerHTML = `${d.sessions.total}<br>sessions`
+      g('today-big').textContent = `${now.toLocaleDateString('en-US', { weekday: 'long' })}\n${now.toLocaleDateString('en-US', { day: 'numeric', month: 'long' })}`
+      g('today-sub').textContent = `${d.today.sessions} sessions · ${d.today.messages.toLocaleString()} messages · ${fmtCompact(d.today.tokens)} tokens · $${d.today.cost.toFixed(2)}`
+      g('sessions-big').textContent = `${d.sessions.total}\nsessions`
       g('sessions-sub').textContent = `${d.sessions.totalMessages.toLocaleString()} messages`
-      g('memories-big').innerHTML = `${d.memories.total}<br>memories`
+      g('memories-big').textContent = `${d.memories.total}\nmemories`
       g('memories-sub').textContent = `${d.memories.feedback} feedback · ${d.memories.project} project`
-      g('rules-big').innerHTML = `${d.rules.total}<br>rules`
+      g('rules-big').textContent = `${d.rules.total}\nrules`
       g('rules-sub').textContent = `${d.rules.global} global · ${d.rules.project} project`
-      g('stats-big').innerHTML = `$${d.stats.allTimeCost.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
-      g('stats-sub').textContent = `${d.stats.allTimeTokens.toLocaleString()} tokens · all time`
+      g('tools-big').textContent = `${d.tools.unique}\ntools`
+      g('tools-sub').textContent = `${fmtCompact(d.tools.total)} calls · ${d.tools.top3}`
+      g('usage-big').textContent = `$${d.stats.allTimeCost.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
+      g('usage-sub').textContent = `${fmtCompact(d.stats.allTimeTokens)} tokens · all time`
     },
   },
   memories: {
@@ -103,7 +106,15 @@ const pages = {
     ],
     data: window.api.loadSettings(),
   },
-  stats: {
+  tools: {
+    columnDefs: [
+      { field: 'name', headerName: 'Tool', suppressSizeToFit: false },
+      { field: 'calls', filter: false, headerName: 'Calls', sort: 'desc', type: 'numericColumn', valueFormatter: fmtNum },
+      { field: 'pct', filter: false, headerName: '%', type: 'numericColumn' },
+    ],
+    data: window.api.loadTools(),
+  },
+  usage: {
     columnDefs: [
       { field: 'model', headerName: 'Model', suppressSizeToFit: false },
       { field: 'inputTokens', filter: false, headerName: 'Input', type: 'numericColumn', valueFormatter: fmtNum },
@@ -157,7 +168,7 @@ q('[data-page]:not([data-page="home"])').forEach(nav => {
 const statsNote = document.createElement('small')
 statsNote.textContent = 'All rates are per million tokens'
 statsNote.style.color = 'var(--color-half)'
-g('stats').querySelector('.page-header').appendChild(statsNote)
+g('usage').querySelector('.page-header').appendChild(statsNote)
 
 q('[data-action]').forEach(btn => btn.addEventListener('click', () => {
   const page = btn.closest('.page')
