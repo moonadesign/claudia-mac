@@ -1,9 +1,10 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Menu, MenuItem, nativeTheme, screen } = require('electron')
+const { app, BrowserWindow, globalShortcut, ipcMain, Menu, MenuItem, nativeImage, nativeTheme, screen, Tray } = require('electron')
+const { execFile } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-let win
+let win, tray, widget
 const claudeDir = path.join(os.homedir(), '.claude')
 const home = os.homedir()
 const tildefy = p => { const t = p.replace(home, '~'); return t.startsWith('~/Code/') ? t.slice(7) : t }
@@ -31,11 +32,165 @@ const createWindow = () => {
   globalShortcut.register('CommandOrControl+Option+I', () => win.webContents.toggleDevTools())
 }
 
+const iconPath = path.join(__dirname, '..', 'claudia-icon.png')
+
+const createTray = () => {
+  if (tray) return
+  const img = nativeImage.createFromPath(iconPath).resize({ height: 18, width: 18 })
+  img.setTemplateImage(true)
+  tray = new Tray(img)
+  const updateMenu = () => {
+    const tokens = getTokens()
+    tray.setTitle(`$${tokens.todayCost.toFixed(2)}`)
+    tray.setToolTip('Claudia')
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { enabled: false, label: `${fmtCompact(tokens.today)} tokens today` },
+      { type: 'separator' },
+      { click: () => { win?.show(); win?.focus() }, label: 'Open Claudia' },
+      { click: () => app.quit(), label: 'Quit' },
+    ]))
+  }
+  updateMenu()
+  tray._refreshInterval = setInterval(updateMenu, 60000)
+}
+
+const destroyTray = () => {
+  if (!tray) return
+  clearInterval(tray._refreshInterval)
+  tray.destroy()
+  tray = null
+}
+
+const fmtCompact = n => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`
+
+const createWidget = () => {
+  if (widget) return
+  const { width: sw } = screen.getPrimaryDisplay().workArea
+  widget = new BrowserWindow({
+    alwaysOnTop: true,
+    frame: false,
+    hasShadow: true,
+    height: 120,
+    resizable: false,
+    skipTaskbar: true,
+    transparent: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    width: 280,
+    x: sw - 300,
+    y: 40,
+  })
+  widget.loadFile(path.join(__dirname, 'widget.html'))
+  widget.on('closed', () => { widget = null })
+}
+
+const destroyWidget = () => {
+  if (!widget) return
+  widget.close()
+  widget = null
+}
+
+const goodiesFile = path.join(claudeDir, 'claudia-goodies.json')
+const loadGoodies = () => {
+  try { return JSON.parse(fs.readFileSync(goodiesFile, 'utf-8')) } catch { return { planRefresh: 0, tray: false, widget: false } }
+}
+
+let planInterval
+const applyGoodies = goodies => {
+  goodies.tray ? createTray() : destroyTray()
+  goodies.widget ? createWidget() : destroyWidget()
+  clearInterval(planInterval)
+  if (goodies.planRefresh > 0) {
+    planInterval = setInterval(() => {
+      ipcMain.emit('plan:refresh')
+    }, goodies.planRefresh * 60000)
+  }
+}
+
 app.setName('Claudia')
-app.dock.setIcon(path.join(__dirname, '..', 'claudia-icon.png'))
-app.whenReady().then(createWindow)
+app.dock.setIcon(iconPath)
+const backupHistory = () => {
+  const historyFile = path.join(claudeDir, 'history.jsonl')
+  if (!fs.existsSync(historyFile)) return
+  const backup = path.join(claudeDir, `history-${localDate()}.jsonl.bak`)
+  if (!fs.existsSync(backup)) fs.copyFileSync(historyFile, backup)
+  const cutoff = Date.now() - 7 * 86400000
+  for (const f of fs.readdirSync(claudeDir).filter(f => /^history-\d{4}-\d{2}-\d{2}\.jsonl\.bak$/.test(f))) {
+    if (fs.statSync(path.join(claudeDir, f)).mtimeMs < cutoff) fs.unlinkSync(path.join(claudeDir, f))
+  }
+}
+
+const cleanUsageSessions = () => {
+  backupHistory()
+  const historyFile = path.join(claudeDir, 'history.jsonl')
+  if (!fs.existsSync(historyFile)) return
+  const lines = fs.readFileSync(historyFile, 'utf-8').trim().split('\n')
+  const bySid = {}
+  for (const line of lines) {
+    try {
+      const d = JSON.parse(line)
+      const sid = d.sessionId
+      if (!sid) continue
+      if (!bySid[sid]) bySid[sid] = { displays: [], lines: [] }
+      bySid[sid].displays.push(d.display || '')
+      bySid[sid].lines.push(line)
+    } catch {}
+  }
+  const junkSids = new Set()
+  for (const [sid, data] of Object.entries(bySid)) {
+    if (data.displays.length === 1 && data.displays[0].includes('/usage')) junkSids.add(sid)
+  }
+  if (!junkSids.size) return
+  const kept = lines.filter(line => { try { return !junkSids.has(JSON.parse(line).sessionId) } catch { return true } })
+  fs.writeFileSync(historyFile, kept.join('\n') + '\n')
+  const projectsDir = path.join(claudeDir, 'projects')
+  if (fs.existsSync(projectsDir)) {
+    for (const proj of fs.readdirSync(projectsDir)) {
+      for (const sid of junkSids) {
+        const f = path.join(projectsDir, proj, `${sid}.jsonl`)
+        if (fs.existsSync(f)) fs.unlinkSync(f)
+      }
+    }
+  }
+}
+
+app.on('will-quit', () => {
+  if (planProc) planProc.kill()
+  clearInterval(planInterval)
+  destroyTray()
+})
+app.whenReady().then(() => {
+  createWindow()
+  applyGoodies(loadGoodies())
+})
 
 ipcMain.handle('theme:set', (_, mode) => { nativeTheme.themeSource = mode })
+ipcMain.handle('goodies:load', () => loadGoodies())
+ipcMain.handle('goodies:set', (_, goodies) => {
+  fs.writeFileSync(goodiesFile, JSON.stringify(goodies))
+  applyGoodies(goodies)
+})
+
+let planProc
+const fetchPlan = () => new Promise(resolve => {
+  const claudeBin = path.join(home, '.local', 'bin', 'claude')
+  const script = `set timeout 20\nspawn ${claudeBin}\nexpect "shortcuts"\nsend "/usage\\r"\nexpect "used"\nsleep 1\n`
+  planProc = execFile('/usr/bin/expect', ['-c', script], { env: { ...process.env, PATH: `${path.join(home, '.local', 'bin')}:/usr/local/bin:/usr/bin:/bin` }, timeout: 30000 }, (err, stdout) => {
+    planProc = null
+    if (!stdout) return resolve(null)
+    const clean = stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ' ').replace(/[^\x20-\x7e\n]/g, ' ').replace(/ +/g, ' ')
+    const pcts = [...clean.matchAll(/(\d+)%\s*used/g)].map(m => parseInt(m[1]))
+    const resets = [...clean.matchAll(/Rese\w*s?\s+([\w :]+(?:am|pm)\s*\([^)]+\))/gi)].map(m => m[1].trim())
+    cleanUsageSessions()
+    resolve({ session: { pct: pcts[0] ?? null, resets: resets[0] || null }, week: { pct: pcts[1] ?? null, resets: resets[1] || null } })
+  })
+})
+
+const planReady = fetchPlan()
+ipcMain.handle('plan:load', () => planReady)
+ipcMain.on('plan:refresh', async () => {
+  const plan = await fetchPlan()
+  if (plan) for (const wc of [win, widget].filter(Boolean)) wc.webContents.send('plan:update', plan)
+})
 
 const pricing = {
   'claude-opus-4-6': { cacheRead: 0.50, cacheWrite: 10, input: 5, output: 25 },
@@ -54,39 +209,63 @@ const getTokens = () => {
   let todayTokens = 0, allTimeTokens = 0
   const byModel = {}
   const todayByModel = {}
+
+  const processLine = line => {
+    if (!line.includes('"usage"')) return
+    try {
+      const msg = JSON.parse(line)
+      const u = msg.message?.usage
+      if (!u) return
+      const t = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+      allTimeTokens += t
+      const model = msg.message?.model
+      if (!model || model === '<synthetic>') return
+      if (!byModel[model]) byModel[model] = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, model, outputTokens: 0 }
+      byModel[model].inputTokens += u.input_tokens || 0
+      byModel[model].outputTokens += u.output_tokens || 0
+      byModel[model].cacheReadInputTokens += u.cache_read_input_tokens || 0
+      byModel[model].cacheCreationInputTokens += u.cache_creation_input_tokens || 0
+      const ts = msg.timestamp || msg._audit_timestamp
+      if (ts && localDate(new Date(ts)) === today) {
+        todayTokens += t
+        if (!todayByModel[model]) todayByModel[model] = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, outputTokens: 0 }
+        todayByModel[model].inputTokens += u.input_tokens || 0
+        todayByModel[model].outputTokens += u.output_tokens || 0
+        todayByModel[model].cacheReadInputTokens += u.cache_read_input_tokens || 0
+        todayByModel[model].cacheCreationInputTokens += u.cache_creation_input_tokens || 0
+      }
+    } catch {}
+  }
+
+  const scanJsonl = dir => {
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+      for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) processLine(line)
+    }
+  }
+
   const projectsDir = path.join(claudeDir, 'projects')
   if (fs.existsSync(projectsDir)) {
-    for (const proj of fs.readdirSync(projectsDir)) {
-      const dir = path.join(projectsDir, proj)
-      for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
-        for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) {
-          if (!line.includes('"usage"')) continue
-          try {
-            const msg = JSON.parse(line)
-            const u = msg.message?.usage
-            if (!u) continue
-            const t = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
-            allTimeTokens += t
-            const model = msg.message?.model
-            if (!model || model === '<synthetic>') continue
-            if (!byModel[model]) byModel[model] = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, model, outputTokens: 0 }
-            byModel[model].inputTokens += u.input_tokens || 0
-            byModel[model].outputTokens += u.output_tokens || 0
-            byModel[model].cacheReadInputTokens += u.cache_read_input_tokens || 0
-            byModel[model].cacheCreationInputTokens += u.cache_creation_input_tokens || 0
-            if (msg.timestamp && localDate(new Date(msg.timestamp)) === today) {
-              todayTokens += t
-              if (!todayByModel[model]) todayByModel[model] = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0, inputTokens: 0, outputTokens: 0 }
-              todayByModel[model].inputTokens += u.input_tokens || 0
-              todayByModel[model].outputTokens += u.output_tokens || 0
-              todayByModel[model].cacheReadInputTokens += u.cache_read_input_tokens || 0
-              todayByModel[model].cacheCreationInputTokens += u.cache_creation_input_tokens || 0
-            }
-          } catch {}
+    for (const proj of fs.readdirSync(projectsDir)) scanJsonl(path.join(projectsDir, proj))
+  }
+
+  for (const base of [desktopSessionsDir, path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions')]) {
+    if (!fs.existsSync(base)) continue
+    for (const org of fs.readdirSync(base)) {
+      const orgDir = path.join(base, org)
+      if (!fs.statSync(orgDir).isDirectory()) continue
+      for (const ws of fs.readdirSync(orgDir)) {
+        const wsDir = path.join(orgDir, ws)
+        if (!fs.statSync(wsDir).isDirectory()) continue
+        for (const sess of fs.readdirSync(wsDir).filter(f => fs.statSync(path.join(wsDir, f)).isDirectory())) {
+          const auditFile = path.join(wsDir, sess, 'audit.jsonl')
+          if (fs.existsSync(auditFile)) {
+            for (const line of fs.readFileSync(auditFile, 'utf-8').trim().split('\n')) processLine(line)
+          }
         }
       }
     }
   }
+
   for (const m of Object.values(byModel)) m.cost = modelCost(m.model, m)
   const todayCost = Object.entries(todayByModel).reduce((sum, [model, u]) => sum + modelCost(model, u), 0)
   const allTimeCost = Object.values(byModel).reduce((sum, m) => sum + m.cost, 0)
@@ -226,59 +405,113 @@ ipcMain.handle('rules:load', () => {
   return rules
 })
 
+const desktopSessionsDir = path.join(home, 'Library', 'Application Support', 'Claude', 'local-agent-mode-sessions')
+
 ipcMain.handle('sessions:load', () => {
+  const sessions = []
+
   const historyFile = path.join(claudeDir, 'history.jsonl')
-  if (!fs.existsSync(historyFile)) return []
-  const names = {}
-  const aiTitles = {}
-  const projectsDir = path.join(claudeDir, 'projects')
-  if (fs.existsSync(projectsDir)) {
-    for (const proj of fs.readdirSync(projectsDir)) {
-      const dir = path.join(projectsDir, proj)
-      for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
-        const sid = file.replace('.jsonl', '')
-        for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) {
-          if (!line.includes('"custom-title"') && !line.includes('"ai-title"')) continue
+  if (fs.existsSync(historyFile)) {
+    const names = {}
+    const aiTitles = {}
+    const projectsDir = path.join(claudeDir, 'projects')
+    if (fs.existsSync(projectsDir)) {
+      for (const proj of fs.readdirSync(projectsDir)) {
+        const dir = path.join(projectsDir, proj)
+        for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+          const sid = file.replace('.jsonl', '')
+          for (const line of fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n')) {
+            if (!line.includes('"custom-title"') && !line.includes('"ai-title"')) continue
+            try {
+              const d = JSON.parse(line)
+              if (d.type === 'custom-title') names[sid] = d.customTitle
+              else if (d.type === 'ai-title') aiTitles[sid] = d.title || d.aiTitle
+            } catch {}
+          }
+        }
+      }
+    }
+    const cliSessions = new Map()
+    for (const line of fs.readFileSync(historyFile, 'utf-8').trim().split('\n')) {
+      const entry = JSON.parse(line)
+      const project = entry.project || '(unknown)'
+      const date = new Date(entry.timestamp)
+      const key = entry.sessionId || `${project}::${localDate(date)}`
+      if (cliSessions.has(key)) {
+        const s = cliSessions.get(key)
+        s.end = entry.timestamp
+        s.lastDisplay = entry.display
+        s.messages++
+        s.timestamps.push(entry.timestamp)
+      } else {
+        const sid = entry.sessionId || key
+        cliSessions.set(key, { aiTitle: aiTitles[sid] || '', end: entry.timestamp, firstDisplay: entry.display, lastDisplay: entry.display, messages: 1, name: names[sid] || '', project: tildefy(project), source: 'CLI', start: entry.timestamp, timestamps: [entry.timestamp] })
+      }
+    }
+    const GAP = 30 * 60000
+    for (const s of cliSessions.values()) {
+      s.timestamps.sort((a, b) => a - b)
+      let active = 0
+      for (let i = 1; i < s.timestamps.length; i++) {
+        const gap = s.timestamps[i] - s.timestamps[i - 1]
+        if (gap < GAP) active += gap
+      }
+      const days = new Set(s.timestamps.map(t => localDate(new Date(t)))).size
+      s.duration = Math.round(active / 60000) + days * 5
+      delete s.timestamps
+    }
+    for (const s of cliSessions.values()) {
+      if (s.messages === 1 && s.firstDisplay?.includes('/usage')) continue
+      sessions.push(s)
+    }
+  }
+
+  const desktopDirs = [
+    [desktopSessionsDir, () => 'Cowork'],
+    [path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions'), () => 'Code'],
+  ]
+  for (const [base, sourceFor] of desktopDirs) {
+    if (!fs.existsSync(base)) continue
+    for (const org of fs.readdirSync(base)) {
+      const orgDir = path.join(base, org)
+      if (!fs.statSync(orgDir).isDirectory()) continue
+      for (const ws of fs.readdirSync(orgDir)) {
+        const wsDir = path.join(orgDir, ws)
+        if (!fs.statSync(wsDir).isDirectory()) continue
+        for (const file of fs.readdirSync(wsDir).filter(f => f.endsWith('.json') && f.startsWith('local_'))) {
           try {
-            const d = JSON.parse(line)
-            if (d.type === 'custom-title') names[sid] = d.customTitle
-            else if (d.type === 'ai-title') aiTitles[sid] = d.title || d.aiTitle
+            const d = JSON.parse(fs.readFileSync(path.join(wsDir, file), 'utf-8'))
+            const sessDir = path.join(wsDir, file.replace('.json', ''))
+            const auditFile = path.join(sessDir, 'audit.jsonl')
+            let messages = d.completedTurns || 0, lastDisplay = ''
+            if (fs.existsSync(auditFile)) {
+              messages = 0
+              for (const line of fs.readFileSync(auditFile, 'utf-8').trim().split('\n')) {
+                if (!line.includes('"type":"user"')) continue
+                try { const m = JSON.parse(line); if (m.type === 'user') { messages++; lastDisplay = typeof m.message?.content === 'string' ? m.message.content.slice(0, 200) : '' } } catch {}
+              }
+            }
+            const dur = d.lastActivityAt && d.createdAt ? Math.round((d.lastActivityAt - d.createdAt) / 60000) : 0
+            sessions.push({
+              aiTitle: '',
+              duration: dur,
+              end: d.lastActivityAt,
+              firstDisplay: d.initialMessage?.slice(0, 200) || '',
+              lastDisplay,
+              messages,
+              model: d.model || '',
+              name: d.title || d.processName || '',
+              project: (d.userSelectedFolders || (d.originCwd ? [d.originCwd] : [])).map(tildefy).join(', '),
+              source: sourceFor(d),
+              start: d.createdAt,
+            })
           } catch {}
         }
       }
     }
   }
-  const lines = fs.readFileSync(historyFile, 'utf-8').trim().split('\n')
-  const sessions = new Map()
-  for (const line of lines) {
-    const entry = JSON.parse(line)
-    const project = entry.project || '(unknown)'
-    const date = new Date(entry.timestamp)
-    const key = entry.sessionId || `${project}::${date.toISOString().slice(0, 10)}`
-    if (sessions.has(key)) {
-      const s = sessions.get(key)
-      s.end = entry.timestamp
-      s.lastDisplay = entry.display
-      s.messages++
-      s.timestamps.push(entry.timestamp)
-    } else {
-      const sid = entry.sessionId || key
-      sessions.set(key, { aiTitle: aiTitles[sid] || '', end: entry.timestamp, firstDisplay: entry.display, lastDisplay: entry.display, messages: 1, name: names[sid] || '', project: tildefy(project), start: entry.timestamp, timestamps: [entry.timestamp] })
-    }
-  }
-  const GAP = 30 * 60000
-  for (const s of sessions.values()) {
-    s.timestamps.sort((a, b) => a - b)
-    let active = 0
-    for (let i = 1; i < s.timestamps.length; i++) {
-      const gap = s.timestamps[i] - s.timestamps[i - 1]
-      if (gap < GAP) active += gap
-    }
-    const days = new Set(s.timestamps.map(t => localDate(new Date(t)))).size
-    s.duration = Math.round(active / 60000) + days * 5
-    delete s.timestamps
-  }
-  return [...sessions.values()].sort((a, b) => b.end - a.end)
+
+  return sessions.sort((a, b) => b.end - a.end)
 })
 
 ipcMain.handle('settings:load', () => {

@@ -4,6 +4,8 @@
   --color-sessions: #3b82f6;
   --color-settings: #ec4899;
   --color-usage: #22c55e;
+  --color-goodies: #f97316;
+  --color-plan: #8b5cf6;
   --color-tools: #06b6d4;
 }
 
@@ -84,6 +86,8 @@
 [data-page="settings-page"]:hover { background: var(--color-settings); color: var(--color-always-white); }
 [data-page="usage"].active,
 [data-page="usage"]:hover { background: var(--color-usage); color: var(--color-always-white); }
+[data-page="goodies"].active,
+[data-page="goodies"]:hover { background: var(--color-goodies); color: var(--color-always-white); }
 [data-page="tools"].active,
 [data-page="tools"]:hover { background: var(--color-tools); color: var(--color-always-white); }
 
@@ -106,6 +110,7 @@
 .home-card-rules { background: var(--color-rules); }
 .home-card-sessions { background: var(--color-sessions); }
 .home-card-usage { background: var(--color-usage); }
+.home-card-plan { background: var(--color-plan); }
 .home-card-tools { background: var(--color-tools); }
 
 .home-card {
@@ -188,5 +193,82 @@
 .grid-container .ag-header-cell:hover .ag-header-cell-menu-button,
 .grid-container .ag-header-cell:hover .ag-header-icon {
   opacity: 1;
+}
+
+.goodies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.goodies-item {
+  align-items: center;
+  background: var(--color-lightest);
+  border: 1px solid var(--color-light);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.goodies-info {
+  flex: 1;
+}
+
+.goodies-name {
+  font-weight: 700;
+}
+
+.goodies-desc {
+  color: var(--color-half);
+  font-size: 0.875rem;
+}
+
+.plan-section {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.plan-loading {
+  color: var(--color-half);
+}
+
+.plan-row {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+}
+
+.plan-label {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.plan-bar-track {
+  background: var(--color-light);
+  border-radius: 0.25rem;
+  flex: 1;
+  height: 0.5rem;
+}
+
+.plan-bar-fill {
+  background: var(--color-plan);
+  border-radius: 0.25rem;
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.plan-pct {
+  font-weight: 700;
+  min-width: 2.5rem;
+  text-align: right;
+}
+
+.plan-reset {
+  color: var(--color-half);
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 

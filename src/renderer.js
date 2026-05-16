@@ -65,6 +65,7 @@ const pages = {
       g('tools-sub').textContent = `${fmtCompact(d.tools.total)} calls · ${d.tools.top3}`
       g('usage-big').textContent = `$${d.stats.allTimeCost.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
       g('usage-sub').textContent = `${fmtCompact(d.stats.allTimeTokens)} tokens · all time`
+      window.api.onPlanUpdate(renderPlan)
     },
   },
   memories: {
@@ -87,6 +88,7 @@ const pages = {
   sessions: {
     columnDefs: [
       { field: 'start', filter: false, headerName: 'Date', sort: 'desc', valueFormatter: fmtDate },
+      { field: 'source', headerName: 'Source' },
       { field: 'name', headerName: 'Name' },
       { field: 'aiTitle', headerName: 'AI Title', hide: true },
       { field: 'project', headerName: 'Path' },
@@ -96,6 +98,18 @@ const pages = {
       { field: 'duration', filter: false, headerName: 'Duration', type: 'numericColumn', valueFormatter: fmtDuration },
     ],
     data: window.api.loadSessions(),
+  },
+  goodies: {
+    data: window.api.loadGoodies(),
+    render: d => {
+      g('goodie-tray').checked = d.tray
+      g('goodie-widget').checked = d.widget
+      g('goodie-plan-refresh').value = d.planRefresh || 0
+      const save = () => window.api.setGoodies({ planRefresh: parseInt(g('goodie-plan-refresh').value), tray: g('goodie-tray').checked, widget: g('goodie-widget').checked })
+      g('goodie-tray').addEventListener('change', save)
+      g('goodie-widget').addEventListener('change', save)
+      g('goodie-plan-refresh').addEventListener('change', save)
+    },
   },
   'settings-page': {
     columnDefs: [
@@ -157,7 +171,7 @@ q('[data-nav]').forEach(card => card.addEventListener('click', () => showPage(ca
 g('sidebar-toggle').addEventListener('click', () => g('side').classList.toggle('collapsed'))
 
 const tmpl = g('grid-page-template')
-q('[data-page]:not([data-page="home"])').forEach(nav => {
+q('[data-page]:not([data-page="home"]):not([data-page="goodies"])').forEach(nav => {
   const page = tmpl.content.cloneNode(true).firstElementChild
   page.id = nav.dataset.page
   page.querySelector(':scope > .page-header > i').className = nav.querySelector('i').className
@@ -170,6 +184,18 @@ statsNote.textContent = 'All rates are per million tokens'
 statsNote.style.color = 'var(--color-half)'
 g('usage').querySelector('.page-header').appendChild(statsNote)
 
+const planSection = document.createElement('div')
+planSection.id = 'plan-detail'
+planSection.className = 'plan-section'
+planSection.innerHTML = '<div class="plan-loading">Loading plan data...</div>'
+g('usage').querySelector('.page-header').after(planSection)
+
+const renderPlanDetail = p => {
+  if (!p) { planSection.innerHTML = '<div class="plan-loading">Could not load plan data</div>'; return }
+  const bar = (label, pct, resets) => `<div class="plan-row"><div class="plan-label">${label}</div><div class="plan-bar-track"><div class="plan-bar-fill" style="width:${pct}%"></div></div><div class="plan-pct">${pct}%</div>${resets ? `<div class="plan-reset">resets ${resets}</div>` : ''}</div>`
+  planSection.innerHTML = bar('Session', p.session.pct ?? 0, p.session.resets) + bar('Weekly', p.week.pct ?? 0, p.week.resets)
+}
+
 q('[data-action]').forEach(btn => btn.addEventListener('click', () => {
   const page = btn.closest('.page')
   const grid = grids[page.id]
@@ -181,5 +207,14 @@ q('[data-action]').forEach(btn => btn.addEventListener('click', () => {
     grid.showColumnChooser()
   }
 }))
+
+const renderPlan = p => {
+  if (!p) { g('plan-big').textContent = '—'; g('plan-sub').textContent = 'Could not load'; return }
+  g('plan-big').textContent = `${p.session.pct ?? '?'}%\nsession`
+  g('plan-sub').textContent = `${p.week.pct ?? '?'}% weekly`
+  renderPlanDetail(p)
+}
+window.api.loadPlan().then(renderPlan)
+window.api.onPlanUpdate(renderPlan)
 
 showPage('home')

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        -webkit-app-region: drag;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 12px;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        padding: 16px;
+      }
+      .label { color: rgba(255, 255, 255, 0.5); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+      .cost { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; margin: 4px 0; }
+      .sub { color: rgba(255, 255, 255, 0.5); }
+    </style>
+  </head>
+  <body>
+    <div class="label">Today</div>
+    <div class="cost" id="cost">$0.00</div>
+    <div class="sub" id="sub">0 tokens</div>
+    <script>
+      const g = document.getElementById.bind(document)
+      const fmt = n => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`
+      const update = async () => {
+        const d = await window.api.loadHome()
+        g('cost').textContent = `$${d.today.cost.toFixed(2)}`
+        g('sub').textContent = `${fmt(d.today.tokens)} tokens · ${d.today.sessions} sessions`
+      }
+      update()
+      setInterval(update, 60000)
+    </script>
+  </body>
+</html>
