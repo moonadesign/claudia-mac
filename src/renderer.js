@@ -37,6 +37,28 @@ const fmtCost = p => p.value != null ? `$${p.value.toLocaleString(undefined, { m
 const fmtDate = p => new Date(p.value).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
 const fmtDuration = p => { const m = p.value; if (m >= 1440) return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`; return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m` }
 const fmtNum = p => p.value?.toLocaleString()
+const fmtRelativeReset = str => {
+  if (!str) return ''
+  const now = new Date()
+  let target
+  const dateMatch = str.match(/(\w+)\s+(\d+)\s+at\s+(\d+):?(\d*)([ap]m)/)
+  const timeMatch = str.match(/^(\d+):?(\d*)([ap]m)/)
+  if (dateMatch) {
+    const [, mon, day, h, min, ap] = dateMatch
+    target = new Date(`${mon} ${day}, ${now.getFullYear()} ${(ap === 'pm' && +h !== 12 ? +h + 12 : ap === 'am' && +h === 12 ? 0 : +h)}:${min || '00'}`)
+    if (target < now) target.setFullYear(target.getFullYear() + 1)
+  } else if (timeMatch) {
+    const [, h, min, ap] = timeMatch
+    target = new Date(now)
+    target.setHours(ap === 'pm' && +h !== 12 ? +h + 12 : ap === 'am' && +h === 12 ? 0 : +h, +(min || 0), 0, 0)
+    if (target < now) target.setDate(target.getDate() + 1)
+  }
+  if (!target) return ''
+  const diff = Math.round((target - now) / 60000)
+  if (diff < 60) return `resets in ${diff}m`
+  if (diff < 1440) return `resets in ${Math.round(diff / 60)}h`
+  return `resets in ${Math.round(diff / 1440)}d`
+}
 const fmtRate = p => p.value != null ? `$${p.value}` : '—'
 
 const initGrid = (pageId, columnDefs, data) => {
@@ -54,18 +76,27 @@ const pages = {
     render: d => {
       const now = new Date()
       g('today-big').textContent = `${now.toLocaleDateString('en-US', { weekday: 'long' })}\n${now.toLocaleDateString('en-US', { day: 'numeric', month: 'long' })}`
-      g('today-sub').textContent = `${d.today.sessions} sessions · ${d.today.messages.toLocaleString()} messages · ${fmtCompact(d.today.tokens)} tokens · $${d.today.cost.toFixed(2)}`
+      g('today-sub').textContent = `${d.today.sessions} sessions · ${d.today.turns.toLocaleString()} turns · ${fmtCompact(d.today.tokens)} tokens · $${d.today.cost.toFixed(2)}`
       g('sessions-big').textContent = `${d.sessions.total}\nsessions`
-      g('sessions-sub').textContent = `${d.sessions.totalMessages.toLocaleString()} messages`
+      g('sessions-sub').textContent = `${d.sessions.turns.toLocaleString()} turns`
       g('memories-big').textContent = `${d.memories.total}\nmemories`
       g('memories-sub').textContent = `${d.memories.feedback} feedback · ${d.memories.project} project`
       g('rules-big').textContent = `${d.rules.total}\nrules`
       g('rules-sub').textContent = `${d.rules.global} global · ${d.rules.project} project`
       g('tools-big').textContent = `${d.tools.unique}\ntools`
       g('tools-sub').textContent = `${fmtCompact(d.tools.total)} calls · ${d.tools.top3}`
+      if (d.plan) {
+        const resetStr = d.plan.session.resets ? fmtRelativeReset(d.plan.session.resets) : ''
+        g('plan-big').textContent = `${d.plan.session.pct ?? '?'}%\n${resetStr}`
+        const weekReset = d.plan.week.resets ? fmtRelativeReset(d.plan.week.resets) : ''
+        g('plan-sub').textContent = `${d.plan.week.pct ?? '?'}% weekly · ${weekReset}`
+      } else { g('plan-big').textContent = '...'; g('plan-sub').textContent = 'Loading' }
+      g('usage-plan-pct').textContent = d.plan?.session.pct != null ? `${d.plan.session.pct}%` : ''
+      if (d.plan) renderPlanDetail(d.plan)
+      g('settings-big').textContent = `${d.settings.total}\nsettings`
+      g('settings-sub').textContent = `${d.settings.allow} allow · ${d.settings.deny} deny`
       g('usage-big').textContent = `$${d.stats.allTimeCost.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
       g('usage-sub').textContent = `${fmtCompact(d.stats.allTimeTokens)} tokens · all time`
-      window.api.onPlanUpdate(renderPlan)
     },
   },
   memories: {
@@ -94,7 +125,7 @@ const pages = {
       { field: 'project', headerName: 'Path' },
       { field: 'firstDisplay', headerName: 'First Message', hide: true, suppressSizeToFit: false },
       { field: 'lastDisplay', headerName: 'Last Message', suppressSizeToFit: false },
-      { field: 'messages', filter: false, headerName: 'Msgs', type: 'numericColumn' },
+      { field: 'turns', filter: false, headerName: 'Turns', type: 'numericColumn' },
       { field: 'duration', filter: false, headerName: 'Duration', type: 'numericColumn', valueFormatter: fmtDuration },
     ],
     data: window.api.loadSessions(),
@@ -114,7 +145,7 @@ const pages = {
   'settings-page': {
     columnDefs: [
       { field: 'scope', headerName: 'Scope' },
-      { field: 'key', headerName: 'Key' },
+      { field: 'key', headerName: 'Key', sort: 'asc' },
       { field: 'value', headerName: 'Value', suppressSizeToFit: false },
       { field: 'source', headerName: 'Source' },
     ],
@@ -208,13 +239,7 @@ q('[data-action]').forEach(btn => btn.addEventListener('click', () => {
   }
 }))
 
-const renderPlan = p => {
-  if (!p) { g('plan-big').textContent = '—'; g('plan-sub').textContent = 'Could not load'; return }
-  g('plan-big').textContent = `${p.session.pct ?? '?'}%\nsession`
-  g('plan-sub').textContent = `${p.week.pct ?? '?'}% weekly`
-  renderPlanDetail(p)
-}
-window.api.loadPlan().then(renderPlan)
-window.api.onPlanUpdate(renderPlan)
+g('spinner').classList.add('active')
+window.api.onHomeUpdate(d => { pages.home.render(d); g('spinner').classList.remove('active') })
 
 showPage('home')

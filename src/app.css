@@ -1,12 +1,12 @@
 :root {
-  --color-memories: #a855f7;
-  --color-rules: #f59e0b;
-  --color-sessions: #3b82f6;
-  --color-settings: #ec4899;
-  --color-usage: #22c55e;
   --color-goodies: #f97316;
-  --color-plan: #8b5cf6;
+  --color-memories: #22c55e;
+  --color-plan: #ef4444;
+  --color-rules: #8b5cf6;
+  --color-sessions: #f59e0b;
+  --color-settings: #a855f7;
   --color-tools: #06b6d4;
+  --color-usage: #3b82f6;
 }
 
 #app {
@@ -36,11 +36,28 @@
 }
 
 .brand {
+  align-items: center;
+  display: flex;
   font-size: 1.25rem;
   font-weight: 700;
+  gap: 0.5rem;
   letter-spacing: -0.03em;
-  padding: 0 0.75rem;
+  padding: 0 0.75rem 1rem;
 }
+
+.spinner {
+  animation: spin 1s linear infinite;
+  border: 1.5px solid var(--color-light);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  display: none;
+  height: 1rem;
+  width: 1rem;
+}
+
+.spinner.active { display: inline-block; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
 
 #side-drag {
   -webkit-app-region: drag;
@@ -105,12 +122,13 @@
   grid-template-rows: auto auto auto;
 }
 
-.home-card-today { background: var(--color-lighter); grid-column: 1 / -1; }
+.home-card-today { background: var(--color-lighter); grid-column: span 2; }
 .home-card-memories { background: var(--color-memories); }
 .home-card-rules { background: var(--color-rules); }
 .home-card-sessions { background: var(--color-sessions); }
 .home-card-usage { background: var(--color-usage); }
 .home-card-plan { background: var(--color-plan); }
+.home-card-settings { background: var(--color-settings); }
 .home-card-tools { background: var(--color-tools); }
 
 .home-card {

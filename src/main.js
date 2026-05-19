@@ -9,6 +9,9 @@ const claudeDir = path.join(os.homedir(), '.claude')
 const home = os.homedir()
 const tildefy = p => { const t = p.replace(home, '~'); return t.startsWith('~/Code/') ? t.slice(7) : t }
 const dirToProject = d => d.replace(/-/g, '/').replace(/^\//, '~/').replace('~/Users/' + os.userInfo().username, '~')
+const stateFile = path.join(claudeDir, 'claudia.json')
+const loadState = () => { try { return JSON.parse(fs.readFileSync(stateFile, 'utf-8')) } catch { return {} } }
+const saveState = patch => { try { fs.writeFileSync(stateFile, JSON.stringify({ ...loadState(), ...patch })) } catch {} }
 
 const createWindow = () => {
   const { x: wx, y: wy, height: sh, width: sw } = screen.getPrimaryDisplay().workArea
@@ -36,27 +39,56 @@ const iconPath = path.join(__dirname, '..', 'claudia-icon.png')
 
 const createTray = () => {
   if (tray) return
-  const img = nativeImage.createFromPath(iconPath).resize({ height: 18, width: 18 })
-  img.setTemplateImage(true)
-  tray = new Tray(img)
-  const updateMenu = () => {
-    const tokens = getTokens()
-    tray.setTitle(`$${tokens.todayCost.toFixed(2)}`)
-    tray.setToolTip('Claudia')
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { enabled: false, label: `${fmtCompact(tokens.today)} tokens today` },
-      { type: 'separator' },
-      { click: () => { win?.show(); win?.focus() }, label: 'Open Claudia' },
-      { click: () => app.quit(), label: 'Quit' },
-    ]))
+  const empty = nativeImage.createEmpty()
+  tray = new Tray(empty)
+  tray.setToolTip('Claudia')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { click: () => { win?.show(); win?.focus() }, label: 'Open Claudia' },
+    { click: () => app.quit(), label: 'Quit' },
+  ]))
+  let idx = 0
+  const relativeReset = str => {
+    if (!str) return null
+    const now = new Date()
+    let target
+    const timeMatch = str.match(/^(\d+):?(\d*)([ap]m)/)
+    const dateMatch = str.match(/(\w+)\s+(\d+)\s+at\s+(\d+):?(\d*)([ap]m)/)
+    if (dateMatch) {
+      const [, mon, day, h, min, ap] = dateMatch
+      target = new Date(`${mon} ${day}, ${now.getFullYear()} ${(ap === 'pm' && +h !== 12 ? +h + 12 : ap === 'am' && +h === 12 ? 0 : +h)}:${min || '00'}`)
+      if (target < now) target.setFullYear(target.getFullYear() + 1)
+    } else if (timeMatch) {
+      const [, h, min, ap] = timeMatch
+      target = new Date(now)
+      target.setHours(ap === 'pm' && +h !== 12 ? +h + 12 : ap === 'am' && +h === 12 ? 0 : +h, +(min || 0), 0, 0)
+      if (target < now) target.setDate(target.getDate() + 1)
+    }
+    if (!target) return null
+    const diff = Math.round((target - now) / 60000)
+    if (diff < 60) return `resets in ${diff}m`
+    if (diff < 1440) return `resets in ${Math.round(diff / 60)}h`
+    return `resets in ${Math.round(diff / 1440)}d`
   }
-  updateMenu()
-  tray._refreshInterval = setInterval(updateMenu, 60000)
+  const cycle = () => {
+    const tokens = getTokens()
+    const plan = planCache
+    const stats = [
+      plan?.session.pct != null ? `${plan.session.pct}% session` : null,
+      relativeReset(plan?.session.resets),
+      `${tokens.todayTurns || 0} turns`,
+      `${fmtCompact(tokens.today)} tokens`,
+      `$${tokens.todayCost.toFixed(2)} today`,
+    ].filter(Boolean)
+    tray.setTitle(stats[idx % stats.length])
+    idx++
+  }
+  cycle()
+  tray._cycleInterval = setInterval(cycle, 4000)
 }
 
 const destroyTray = () => {
   if (!tray) return
-  clearInterval(tray._refreshInterval)
+  clearInterval(tray._cycleInterval)
   tray.destroy()
   tray = null
 }
@@ -89,9 +121,9 @@ const destroyWidget = () => {
   widget = null
 }
 
-const goodiesFile = path.join(claudeDir, 'claudia-goodies.json')
 const loadGoodies = () => {
-  try { return JSON.parse(fs.readFileSync(goodiesFile, 'utf-8')) } catch { return { planRefresh: 0, tray: false, widget: false } }
+  const s = loadState()
+  return { planRefresh: s.planRefresh || 0, tray: s.tray || false, widget: s.widget || false }
 }
 
 let planInterval
@@ -166,7 +198,7 @@ app.whenReady().then(() => {
 ipcMain.handle('theme:set', (_, mode) => { nativeTheme.themeSource = mode })
 ipcMain.handle('goodies:load', () => loadGoodies())
 ipcMain.handle('goodies:set', (_, goodies) => {
-  fs.writeFileSync(goodiesFile, JSON.stringify(goodies))
+  saveState(goodies)
   applyGoodies(goodies)
 })
 
@@ -177,19 +209,28 @@ const fetchPlan = () => new Promise(resolve => {
   planProc = execFile('/usr/bin/expect', ['-c', script], { env: { ...process.env, PATH: `${path.join(home, '.local', 'bin')}:/usr/local/bin:/usr/bin:/bin` }, timeout: 30000 }, (err, stdout) => {
     planProc = null
     if (!stdout) return resolve(null)
-    const clean = stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ' ').replace(/[^\x20-\x7e\n]/g, ' ').replace(/ +/g, ' ')
+    const clean = stdout.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ' ').replace(/[^\x20-\x7e]/g, ' ').replace(/ +/g, ' ')
     const pcts = [...clean.matchAll(/(\d+)%\s*used/g)].map(m => parseInt(m[1]))
-    const resets = [...clean.matchAll(/Rese\w*s?\s+([\w :]+(?:am|pm)\s*\([^)]+\))/gi)].map(m => m[1].trim())
+    const resets = [...clean.matchAll(/Rese\w*s?\s+([\w :]+(?:am|pm))/gi)].map(m => m[1].trim())
     cleanUsageSessions()
     resolve({ session: { pct: pcts[0] ?? null, resets: resets[0] || null }, week: { pct: pcts[1] ?? null, resets: resets[1] || null } })
   })
 })
 
-const planReady = fetchPlan()
-ipcMain.handle('plan:load', () => planReady)
+let planCache = loadState().planCache || null
+const planReady = fetchPlan().then(p => {
+  planCache = p
+  saveState({ planCache: p })
+  const fresh = computeHome()
+  saveState({ homeCache: fresh })
+  if (win) win.webContents.send('home:update', fresh)
+})
 ipcMain.on('plan:refresh', async () => {
-  const plan = await fetchPlan()
-  if (plan) for (const wc of [win, widget].filter(Boolean)) wc.webContents.send('plan:update', plan)
+  planCache = await fetchPlan()
+  saveState({ planCache })
+  const fresh = computeHome()
+  saveState({ homeCache: fresh })
+  if (win) win.webContents.send('home:update', fresh)
 })
 
 const pricing = {
@@ -206,11 +247,14 @@ const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() 
 
 const getTokens = () => {
   const today = localDate()
-  let todayTokens = 0, allTimeTokens = 0
+  let todayTokens = 0, allTimeTokens = 0, todayTurns = 0
   const byModel = {}
   const todayByModel = {}
 
   const processLine = line => {
+    if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
+      try { const d = JSON.parse(line); if (d.type === 'user' && (d.timestamp || d._audit_timestamp) && localDate(new Date(d.timestamp || d._audit_timestamp)) === today) todayTurns++ } catch {}
+    }
     if (!line.includes('"usage"')) return
     try {
       const msg = JSON.parse(line)
@@ -269,16 +313,16 @@ const getTokens = () => {
   for (const m of Object.values(byModel)) m.cost = modelCost(m.model, m)
   const todayCost = Object.entries(todayByModel).reduce((sum, [model, u]) => sum + modelCost(model, u), 0)
   const allTimeCost = Object.values(byModel).reduce((sum, m) => sum + m.cost, 0)
-  return { allTime: allTimeTokens, allTimeCost, byModel, today: todayTokens, todayCost }
+  return { allTime: allTimeTokens, allTimeCost, byModel, today: todayTokens, todayCost, todayTurns }
 }
 
-ipcMain.handle('home:load', () => {
+const computeHome = () => {
   const today = localDate()
   const historyFile = path.join(claudeDir, 'history.jsonl')
   const projectsDir = path.join(claudeDir, 'projects')
   const statsFile = path.join(claudeDir, 'stats-cache.json')
 
-  let todaySessions = new Set(), todayMessages = 0, totalSessions = new Set(), totalMessages = 0
+  let todaySessions = new Set(), todayTurns = 0, totalSessions = new Set(), totalTurns = 0
   if (fs.existsSync(projectsDir)) {
     for (const proj of fs.readdirSync(projectsDir)) {
       const dir = path.join(projectsDir, proj)
@@ -291,8 +335,8 @@ ipcMain.handle('home:load', () => {
             const d = JSON.parse(line)
             if (d.type !== 'user') continue
             hasMessages = true
-            totalMessages++
-            if (d.timestamp && localDate(new Date(d.timestamp)) === today) { todayMessages++; todaySessions.add(sid) }
+            totalTurns++
+            if (d.timestamp && localDate(new Date(d.timestamp)) === today) { todayTurns++; todaySessions.add(sid) }
           } catch {}
         }
         if (hasMessages) totalSessions.add(sid)
@@ -332,11 +376,13 @@ ipcMain.handle('home:load', () => {
     walk(codeDir)
   }
 
-  let settings = 0
+  let settings = 0, settingsAllow = 0, settingsDeny = 0
   const globalSettings = path.join(claudeDir, 'settings.json')
   if (fs.existsSync(globalSettings)) {
     const d = JSON.parse(fs.readFileSync(globalSettings, 'utf-8'))
     settings = Object.keys(d).length
+    settingsAllow = d.permissions?.allow?.length || 0
+    settingsDeny = d.permissions?.deny?.length || 0
   }
 
   const tokens = getTokens()
@@ -344,13 +390,29 @@ ipcMain.handle('home:load', () => {
   const toolsTotal = toolsData.reduce((sum, t) => sum + t.calls, 0)
   return {
     memories: { feedback: memoryTypes.feedback || 0, project: memoryTypes.project || 0, total: memories },
+    plan: planCache,
     rules: { global: globalRules, project: projectRules, total: rules },
-    sessions: { total: totalSessions.size, totalMessages },
-    settings: { total: settings },
+    sessions: { total: totalSessions.size, turns: totalTurns },
+    settings: { allow: settingsAllow, deny: settingsDeny, total: settings },
     stats: { allTimeCost: tokens.allTimeCost, allTimeTokens: tokens.allTime },
-    today: { cost: tokens.todayCost, messages: todayMessages, sessions: todaySessions.size, tokens: tokens.today },
+    today: { cost: tokens.todayCost, sessions: todaySessions.size, tokens: tokens.today, turns: todayTurns },
     tools: { top3: toolsData.slice(0, 3).map(t => `${t.name} ${t.pct}%`).join(' · '), total: toolsTotal, unique: toolsData.length },
   }
+}
+
+ipcMain.handle('home:load', () => {
+  const s = loadState()
+  if (s.homeCache) {
+    setTimeout(() => {
+      const fresh = computeHome()
+      saveState({ homeCache: fresh })
+      if (win) win.webContents.send('home:update', fresh)
+    }, 2000)
+    return s.homeCache
+  }
+  const data = computeHome()
+  saveState({ homeCache: data })
+  return data
 })
 
 ipcMain.handle('memories:load', () => {
@@ -441,11 +503,11 @@ ipcMain.handle('sessions:load', () => {
         const s = cliSessions.get(key)
         s.end = entry.timestamp
         s.lastDisplay = entry.display
-        s.messages++
+        s.turns++
         s.timestamps.push(entry.timestamp)
       } else {
         const sid = entry.sessionId || key
-        cliSessions.set(key, { aiTitle: aiTitles[sid] || '', end: entry.timestamp, firstDisplay: entry.display, lastDisplay: entry.display, messages: 1, name: names[sid] || '', project: tildefy(project), source: 'CLI', start: entry.timestamp, timestamps: [entry.timestamp] })
+        cliSessions.set(key, { aiTitle: aiTitles[sid] || '', end: entry.timestamp, firstDisplay: entry.display, lastDisplay: entry.display, name: names[sid] || '', project: tildefy(project), source: 'CLI', start: entry.timestamp, timestamps: [entry.timestamp], turns: 1 })
       }
     }
     const GAP = 30 * 60000
@@ -461,7 +523,7 @@ ipcMain.handle('sessions:load', () => {
       delete s.timestamps
     }
     for (const s of cliSessions.values()) {
-      if (s.messages === 1 && s.firstDisplay?.includes('/usage')) continue
+      if (s.turns === 1 && s.firstDisplay?.includes('/usage')) continue
       sessions.push(s)
     }
   }
@@ -483,12 +545,12 @@ ipcMain.handle('sessions:load', () => {
             const d = JSON.parse(fs.readFileSync(path.join(wsDir, file), 'utf-8'))
             const sessDir = path.join(wsDir, file.replace('.json', ''))
             const auditFile = path.join(sessDir, 'audit.jsonl')
-            let messages = d.completedTurns || 0, lastDisplay = ''
+            let turns = d.completedTurns || 0, lastDisplay = ''
             if (fs.existsSync(auditFile)) {
-              messages = 0
+              turns = 0
               for (const line of fs.readFileSync(auditFile, 'utf-8').trim().split('\n')) {
                 if (!line.includes('"type":"user"')) continue
-                try { const m = JSON.parse(line); if (m.type === 'user') { messages++; lastDisplay = typeof m.message?.content === 'string' ? m.message.content.slice(0, 200) : '' } } catch {}
+                try { const m = JSON.parse(line); if (m.type === 'user') { turns++; lastDisplay = typeof m.message?.content === 'string' ? m.message.content.slice(0, 200) : '' } } catch {}
               }
             }
             const dur = d.lastActivityAt && d.createdAt ? Math.round((d.lastActivityAt - d.createdAt) / 60000) : 0
@@ -498,7 +560,7 @@ ipcMain.handle('sessions:load', () => {
               end: d.lastActivityAt,
               firstDisplay: d.initialMessage?.slice(0, 200) || '',
               lastDisplay,
-              messages,
+              turns,
               model: d.model || '',
               name: d.title || d.processName || '',
               project: (d.userSelectedFolders || (d.originCwd ? [d.originCwd] : [])).map(tildefy).join(', '),

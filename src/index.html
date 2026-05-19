@@ -16,7 +16,7 @@
     <div id="app">
       <aside id="side">
         <div id="side-drag"></div>
-        <div class="brand">Claudia</div>
+        <div class="brand">Claudia <div class="spinner" id="spinner"></div></div>
         <nav id="side-nav">
           <div class="nav-group">
             <a class="nav-button active" data-page="home">
@@ -41,7 +41,7 @@
             <a class="nav-button" data-page="settings-page">
               <i class="fa-regular fa-sliders"></i>
               <span>Settings</span>
-              <span class="nav-count" id="settings-count"></span>
+              <span class="nav-count" id="settings-page-count"></span>
             </a>
             <a class="nav-button" data-page="tools">
               <i class="fa-regular fa-wrench"></i>
@@ -51,6 +51,7 @@
             <a class="nav-button" data-page="usage">
               <i class="fa-regular fa-chart-bar"></i>
               <span>Usage</span>
+              <span class="nav-count" id="usage-plan-pct"></span>
             </a>
             <a class="nav-button" data-page="goodies">
               <i class="fa-regular fa-gift"></i>
@@ -71,35 +72,40 @@
               <div class="home-card-big" id="today-big"></div>
               <div class="home-card-sub" id="today-sub"></div>
             </div>
-            <div class="home-card glass home-card-memories" id="card-memories" data-nav="memories">
-              <div class="home-card-label">Memories</div>
-              <div class="home-card-big" id="memories-big"></div>
-              <div class="home-card-sub" id="memories-sub"></div>
-            </div>
             <div class="home-card glass home-card-plan" id="card-plan" data-nav="usage">
               <div class="home-card-label">Plan</div>
               <div class="home-card-big" id="plan-big">...</div>
               <div class="home-card-sub" id="plan-sub">Loading</div>
-            </div>
-            <div class="home-card glass home-card-rules" id="card-rules" data-nav="rules">
-              <div class="home-card-label">Rules</div>
-              <div class="home-card-big" id="rules-big"></div>
-              <div class="home-card-sub" id="rules-sub"></div>
             </div>
             <div class="home-card glass home-card-sessions" id="card-sessions" data-nav="sessions">
               <div class="home-card-label">Sessions</div>
               <div class="home-card-big" id="sessions-big"></div>
               <div class="home-card-sub" id="sessions-sub"></div>
             </div>
-            <div class="home-card glass home-card-tools" id="card-tools" data-nav="tools">
-              <div class="home-card-label">Tools</div>
-              <div class="home-card-big" id="tools-big"></div>
-              <div class="home-card-sub" id="tools-sub"></div>
-            </div>
             <div class="home-card glass home-card-usage" id="card-stats" data-nav="usage">
               <div class="home-card-label">Usage</div>
               <div class="home-card-big" id="usage-big"></div>
               <div class="home-card-sub" id="usage-sub"></div>
+            </div>
+            <div class="home-card glass home-card-memories" id="card-memories" data-nav="memories">
+              <div class="home-card-label">Memories</div>
+              <div class="home-card-big" id="memories-big"></div>
+              <div class="home-card-sub" id="memories-sub"></div>
+            </div>
+            <div class="home-card glass home-card-rules" id="card-rules" data-nav="rules">
+              <div class="home-card-label">Rules</div>
+              <div class="home-card-big" id="rules-big"></div>
+              <div class="home-card-sub" id="rules-sub"></div>
+            </div>
+            <div class="home-card glass home-card-settings" id="card-settings" data-nav="settings-page">
+              <div class="home-card-label">Settings</div>
+              <div class="home-card-big" id="settings-big"></div>
+              <div class="home-card-sub" id="settings-sub"></div>
+            </div>
+            <div class="home-card glass home-card-tools" id="card-tools" data-nav="tools">
+              <div class="home-card-label">Tools</div>
+              <div class="home-card-big" id="tools-big"></div>
+              <div class="home-card-sub" id="tools-sub"></div>
             </div>
           </div>
         </section>
